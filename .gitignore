@@ -1,0 +1,20 @@
+# Secrets / entorno local (usar .env.example como plantilla)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node / build del frontend
+node_modules/
+dist/
+
+# Datos / volúmenes
+db_data/
+
+# SO / editor
+.DS_Store
+*.swp
