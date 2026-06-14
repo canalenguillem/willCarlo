@@ -33,6 +33,8 @@ let thirdSlots: Record<string, ThirdSlot> = {};
 let groupProjSims = 0;
 let realForecast: TournamentResponse | null = null;
 let realProjection: BracketResponse | null = null;
+// Modo del cuadro: "likely" = favorito determinista; "random" = una tirada Monte Carlo.
+let projMode: "likely" | "random" = "likely";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -52,6 +54,7 @@ function shell(inner: string): string {
       </div>
       <nav class="tabs">
         <button class="tab ${view === "real" ? "active" : ""}" data-view="real">Real</button>
+        <button class="tab ${view === "lab" ? "active" : ""}" data-view="lab">Laboratorio</button>
       </nav>
     </header>
     <main>${inner}</main>`;
@@ -520,6 +523,7 @@ function groupProjBlock(name: string): string {
           <div class="proj-bar">
             ${seg(t.p_pos[0], "p1", "1&ordm;")}${seg(t.p_pos[1], "p2", "2&ordm;")}${seg(t.p_pos[2], "p3", "3&ordm;")}${seg(t.p_pos[3] ?? 0, "p4", "4&ordm;")}
           </div>
+          <span class="proj-pts" title="Puntos esperados (promedio de las simulaciones)">${t.exp_points.toFixed(1)} pts</span>
           <span class="proj-q">${pct((t.p_pos[0] ?? 0) + (t.p_pos[1] ?? 0))}</span>
         </div>`
     )
@@ -531,7 +535,7 @@ function groupProjBlock(name: string): string {
         <div class="grp-proj-bars">
           <div class="grp-proj-head">Clasificaci&oacute;n final proyectada &middot; ${groupProjSims.toLocaleString("es")} sims</div>
           ${bars}
-          <div class="proj-legend"><i class="p1"></i>1&ordm; <i class="p2"></i>2&ordm; <i class="p3"></i>3&ordm; <i class="p4"></i>4&ordm; &middot; der.: clasifica directo</div>
+          <div class="proj-legend"><i class="p1"></i>1&ordm; <i class="p2"></i>2&ordm; <i class="p3"></i>3&ordm; <i class="p4"></i>4&ordm; &middot; pts: puntos esperados &middot; der.: clasifica directo</div>
         </div>
         ${routesBox(name, teams)}
       </div>
@@ -601,21 +605,48 @@ function fixtureRow(m: MatchFixture): string {
 function predLine(m: MatchFixture): string {
   const p = realPredictions.get(m.id);
   if (!p) return "";
-  const sc = p.most_likely_score;
-  const score = sc
-    ? `${sc[0]}&ndash;${sc[1]}`
+  // Marcador pronosticado: el más probable o, en su defecto, los goles esperados redondeados.
+  const pred: [number, number] | null = p.most_likely_score
+    ? p.most_likely_score
     : p.expected_home_goals != null
-    ? `${Math.round(p.expected_home_goals)}&ndash;${Math.round(p.expected_away_goals!)}`
-    : "&mdash;";
+    ? [Math.round(p.expected_home_goals), Math.round(p.expected_away_goals!)]
+    : null;
+  const score = pred ? `${pred[0]}&ndash;${pred[1]}` : "&mdash;";
   const xg =
     p.expected_home_goals != null
       ? ` &middot; <span class="fx-xg">xg ${p.expected_home_goals.toFixed(2)}&ndash;${p.expected_away_goals!.toFixed(2)}</span>`
       : "";
+
+  const acc = scoreAccent(m, pred);
+  const baseTitle = "Probabilidad de que gane el local, empate, o gane el visitante (oráculo, cancha neutral)";
+  const title = acc.note ? `${acc.note} · ${baseTitle}` : baseTitle;
   return `
-    <div class="fx-pred" title="Probabilidad de que gane el local, empate, o gane el visitante (oráculo, cancha neutral)">
+    <div class="fx-pred${acc.cls}"${acc.style} title="${title}">
       <b>${pct(p.home_win)}</b> &middot; ${pct(p.draw)} &middot; <b>${pct(p.away_win)}</b>
       &middot; prob. <b>${score}</b>${xg}
     </div>`;
+}
+
+// Acento de acierto para un partido YA JUGADO: compara el marcador pronosticado con
+// el real. Coincidencia exacta -> verde; si no, naranja->rojo según cuánto se aleje
+// (poca diferencia = rojo tirando a naranja; mucha = rojo pleno). Sin jugar -> sin color.
+function scoreAccent(m: MatchFixture, pred: [number, number] | null): { cls: string; style: string; note: string } {
+  if (!m.is_played || m.home_goals == null || m.away_goals == null || !pred) {
+    return { cls: "", style: "", note: "" };
+  }
+  const dist = Math.abs(pred[0] - m.home_goals) + Math.abs(pred[1] - m.away_goals);
+  let h: number, s: number, l: number, note: string;
+  if (dist === 0) {
+    h = 140; s = 70; l = 55; // verde: marcador exacto
+    note = "Marcador exacto acertado";
+  } else {
+    h = Math.max(0, 22 - (dist - 1) * 8); // 22 (rojo-naranja) -> 0 (rojo) según se aleja
+    s = 90; l = 60;
+    note = `Marcador a ${dist} gol${dist === 1 ? "" : "es"} del real`;
+  }
+  const color = `hsl(${h} ${s}% ${l}%)`;
+  const bg = `hsl(${h} ${s}% ${l}% / 0.14)`;
+  return { cls: " fx-graded", style: ` style="color:${color};background:${bg}"`, note };
 }
 
 function standTable(g: RealGroup): string {
@@ -862,17 +893,32 @@ function wireForecast() {
   });
 }
 
-// Proyección: un cuadro de 16avos -> final jugado una vez desde el estado real.
+// Cuadro de 16avos -> final partiendo del estado real. Dos modos seleccionables:
+//  - "likely": determinista, en cada llave pasa el favorito (con su probabilidad).
+//  - "random": una tirada Monte Carlo, cada cruce se juega al azar (con marcador);
+//    cada recálculo da un cuadro plausible distinto.
 function projectionSection(): string {
   const board = realProjection
     ? renderCuadro(realProjection)
     : `<div class="panel"><p class="empty">Simulando el cuadro&hellip;</p></div>`;
+  const hint =
+    projMode === "likely"
+      ? `Cuadro <b>m&aacute;s probable</b>: en cada llave pasa el <b>favorito</b> (con su probabilidad de pasar). Es determinista, sale siempre el mismo.`
+      : `<b>Tirada Monte Carlo</b>: cada cruce se juega al azar seg&uacute;n sus probabilidades (con marcador y penales). Cada tirada da un cuadro plausible distinto.`;
+  const btnLabel = projMode === "likely" ? "&#8635; Recalcular" : "&#127922; Otra tirada";
   return `
     <section class="panel">
       <div class="real-top">
-        <p class="hint" style="margin:0">El cuadro <b>m&aacute;s probable</b> de 16avos a la final partiendo de lo ya jugado: los clasificados m&aacute;s probables de cada grupo y, en cada llave, el favorito con su probabilidad de pasar.</p>
-        <button class="go" id="reroll">&#8635; Recalcular</button>
+        <div class="field" style="margin:0">
+          <label>Modo</label>
+          <select id="projmode" class="mode-select">
+            <option value="likely" ${projMode === "likely" ? "selected" : ""}>Cuadro m&aacute;s probable (favorito)</option>
+            <option value="random" ${projMode === "random" ? "selected" : ""}>Tirada Monte Carlo (al azar)</option>
+          </select>
+        </div>
+        <button class="go" id="reroll">${btnLabel}</button>
       </div>
+      <p class="hint" style="margin:8px 0 0">${hint}</p>
     </section>
     <div id="projection-board">${board}</div>`;
 }
@@ -880,8 +926,12 @@ function projectionSection(): string {
 async function loadProjection() {
   const board = app.querySelector<HTMLDivElement>("#projection-board");
   if (!board) return;
+  board.innerHTML = `<div class="panel"><p class="empty">${
+    projMode === "likely" ? "Calculando el cuadro m&aacute;s probable" : "Jugando una tirada"
+  }&hellip;</p></div>`;
   try {
-    realProjection = await api.likelyBracket(5000);
+    realProjection =
+      projMode === "likely" ? await api.likelyBracket(5000) : await api.playBracket(null);
     board.innerHTML = renderCuadro(realProjection);
   } catch (e) {
     board.innerHTML = `<div class="panel"><p class="error">No se pudo calcular: ${escape(String(e))}</p></div>`;
@@ -889,6 +939,13 @@ async function loadProjection() {
 }
 
 function wireProjection() {
+  const sel = app.querySelector<HTMLSelectElement>("#projmode");
+  if (sel)
+    sel.addEventListener("change", () => {
+      projMode = sel.value as typeof projMode;
+      realProjection = null; // re-renderiza textos/botón y recalcula en el nuevo modo
+      paintReal();
+    });
   const btn = app.querySelector<HTMLButtonElement>("#reroll");
   if (btn)
     btn.addEventListener("click", async () => {
