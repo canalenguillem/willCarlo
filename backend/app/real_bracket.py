@@ -29,10 +29,16 @@ def _expected_matches(n: int) -> int:
     return n * (n - 1) // 2
 
 
-def build_group_tables(db: Session, fifa: dict[str, float]) -> dict[str, GroupTable]:
-    """Una GroupTable por grupo, alimentada solo con los fixtures jugados.
+def build_group_tables(
+    db: Session, fifa: dict[str, float], include_live: bool = False
+) -> dict[str, GroupTable]:
+    """Una GroupTable por grupo, alimentada con los fixtures jugados.
 
-    Respeta la orientación home=team_a (importa para el desempate head-to-head)."""
+    Respeta la orientación home=team_a (importa para el desempate head-to-head).
+    Con `include_live=True` también suma los partidos EN VIVO (provisional), pero
+    estos no cuentan para la completitud del grupo: `final_match_count` solo registra
+    los finalizados, así la clasificación a eliminación sigue esperando el resultado
+    final mientras la tabla muestra el marcador en curso."""
     fixtures_by_group: dict[str, list[Fixture]] = {}
     for f in db.query(Fixture).all():
         fixtures_by_group.setdefault(f.group, []).append(f)
@@ -40,17 +46,27 @@ def build_group_tables(db: Session, fifa: dict[str, float]) -> dict[str, GroupTa
     tables: dict[str, GroupTable] = {}
     for g in db.query(Group).order_by(Group.name).all():
         table = GroupTable(g.name, list(g.team_ids), fifa)
+        final_count = live_count = 0
         for f in fixtures_by_group.get(g.name, []):
-            if f.is_played and f.home_goals is not None and f.away_goals is not None:
-                table.add_match(
-                    SimulatedMatch(g.name, f.home_team_id, f.away_team_id, f.home_goals, f.away_goals)
-                )
+            if f.home_goals is None or f.away_goals is None:
+                continue
+            is_live = (not f.is_played) and f.status == "live"
+            if f.is_played:
+                table.add_match(SimulatedMatch(g.name, f.home_team_id, f.away_team_id, f.home_goals, f.away_goals))
+                final_count += 1
+            elif is_live and include_live:
+                table.add_match(SimulatedMatch(g.name, f.home_team_id, f.away_team_id, f.home_goals, f.away_goals))
+                live_count += 1
+        table.final_match_count = final_count  # type: ignore[attr-defined]
+        table.live_match_count = live_count  # type: ignore[attr-defined]
         tables[g.name] = table
     return tables
 
 
 def group_is_complete(table: GroupTable) -> bool:
-    return len(table.matches) == _expected_matches(len(table.standings))
+    # Solo los finalizados definen la completitud; los partidos en vivo no terminan el grupo.
+    final = getattr(table, "final_match_count", len(table.matches))
+    return final == _expected_matches(len(table.standings))
 
 
 def _slot(team_id: str | None, label: str, names: dict[str, str]) -> dict:
@@ -59,7 +75,7 @@ def _slot(team_id: str | None, label: str, names: dict[str, str]) -> dict:
 
 def real_bracket_state(db: Session, fifa: dict[str, float], names: dict[str, str]) -> dict:
     """Estado completo del cuadro real: tablas de grupos + eliminación resuelta."""
-    tables = build_group_tables(db, fifa)
+    tables = build_group_tables(db, fifa, include_live=True)
     ranked_by_group = {name: t.rank() for name, t in tables.items()}
     complete = {name: group_is_complete(t) for name, t in tables.items()}
     all_complete = all(complete.values())
@@ -68,6 +84,7 @@ def real_bracket_state(db: Session, fifa: dict[str, float], names: dict[str, str
         {
             "name": name,
             "complete": complete[name],
+            "has_live": getattr(tables[name], "live_match_count", 0) > 0,
             "standings": [
                 {
                     "position": i + 1,

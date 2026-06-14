@@ -173,6 +173,7 @@ export interface RealTie {
 export interface RealGroup {
   name: string;
   complete: boolean;
+  has_live: boolean; // hay un partido en vivo sumado de forma provisional
   standings: BracketStanding[];
 }
 
@@ -221,11 +222,11 @@ export const api = {
       body: JSON.stringify({ seed }),
     }).then((r) => json<BracketResponse>(r)),
 
-  likelyBracket: (simulations: number | null) =>
+  likelyBracket: (simulations: number | null, seed: number | null = null) =>
     fetch("/api/tournament/bracket/likely", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ simulations }),
+      body: JSON.stringify({ simulations, seed }),
     }).then((r) => json<BracketResponse>(r)),
 
   matches: () => fetch("/api/matches").then((r) => json<MatchFixture[]>(r)),

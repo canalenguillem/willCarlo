@@ -209,6 +209,8 @@ tbody tr:hover { background: var(--panel-2); }
 .stand tr.qual td { color: var(--chalk); }
 .stand tr.qual td:first-child { border-left: 2px solid var(--grass-bright); }
 .stand tr.third td:first-child { border-left: 2px solid var(--gold); }
+.stand-live { font-family: var(--mono); font-size: 10px; color: var(--live, #ff5470); margin-top: 6px; }
+.stand-live b { color: var(--live, #ff5470); }
 
 /* --- Cuadro real editable --- */
 .bk-slot.empty .bk-nm { color: var(--muted); font-style: italic; }

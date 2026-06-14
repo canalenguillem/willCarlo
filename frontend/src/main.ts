@@ -33,8 +33,10 @@ let thirdSlots: Record<string, ThirdSlot> = {};
 let groupProjSims = 0;
 let realForecast: TournamentResponse | null = null;
 let realProjection: BracketResponse | null = null;
-// Modo del cuadro: "likely" = favorito determinista; "random" = una tirada Monte Carlo.
-let projMode: "likely" | "random" = "likely";
+// Semilla de la última simulación de grupos: el cuadro probable se siembra con ESA
+// misma simulación (mismo seed + nº de sims => clasificados idénticos a los de
+// "Fase de grupos"). null = todavía no se corrió.
+let groupSimSeed: number | null = null;
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -55,6 +57,7 @@ function shell(inner: string): string {
       <nav class="tabs">
         <button class="tab ${view === "real" ? "active" : ""}" data-view="real">Real</button>
         <button class="tab ${view === "lab" ? "active" : ""}" data-view="lab">Laboratorio</button>
+        <button class="tab ${view === "tournament" ? "active" : ""}" data-view="tournament">Torneo</button>
       </nav>
     </header>
     <main>${inner}</main>`;
@@ -650,6 +653,9 @@ function scoreAccent(m: MatchFixture, pred: [number, number] | null): { cls: str
 }
 
 function standTable(g: RealGroup): string {
+  const liveNote = g.has_live
+    ? `<p class="stand-live">Incluye un partido <b>en vivo</b> (provisional)</p>`
+    : "";
   return `
     <table class="stand">
       <thead><tr><th>#</th><th>Equipo</th><th>Pts</th><th>DG</th></tr></thead>
@@ -664,7 +670,7 @@ function standTable(g: RealGroup): string {
           )
           .join("")}
       </tbody>
-    </table>`;
+    </table>${liveNote}`;
 }
 
 function wireGroupInputs() {
@@ -697,17 +703,26 @@ function wireGroupInputs() {
       gbtn.disabled = true;
       gbtn.textContent = "Simulando…";
       try {
-        const res = await api.simulateGroups(Number.isNaN(sims) ? null : sims, null);
-        groupProj = new Map(res.groups.map((g) => [g.name, g.teams]));
-        groupRoutes = new Map(res.groups.map((g) => [g.name, g.routes ?? {}]));
-        thirdSlots = res.third_slots ?? {};
-        groupProjSims = res.simulations;
+        await runGroupSim(Number.isNaN(sims) ? null : sims);
         paintReal();
       } catch (e) {
         gbtn.textContent = "Error";
         gbtn.disabled = false;
       }
     });
+}
+
+// Corre la simulación de la fase de grupos con una semilla nueva y guarda su estado.
+// El cuadro probable reusa esa misma semilla y nº de sims para sembrarse idéntico.
+async function runGroupSim(sims: number | null): Promise<void> {
+  const seed = Math.floor(Math.random() * 1_000_000_000);
+  const res = await api.simulateGroups(sims, seed);
+  groupProj = new Map(res.groups.map((g) => [g.name, g.teams]));
+  groupRoutes = new Map(res.groups.map((g) => [g.name, g.routes ?? {}]));
+  thirdSlots = res.third_slots ?? {};
+  groupProjSims = res.simulations;
+  groupSimSeed = seed;
+  realProjection = null; // el cuadro debe recomputarse desde la nueva simulación
 }
 
 // El cuadro real reusa la estética .bk-* del cuadro simulado, pero con ties
@@ -893,32 +908,29 @@ function wireForecast() {
   });
 }
 
-// Cuadro de 16avos -> final partiendo del estado real. Dos modos seleccionables:
-//  - "likely": determinista, en cada llave pasa el favorito (con su probabilidad).
-//  - "random": una tirada Monte Carlo, cada cruce se juega al azar (con marcador);
-//    cada recálculo da un cuadro plausible distinto.
+// Cuadro de 16avos -> final, DETERMINISTA: la siembra (clasificados) sale de la
+// simulación de la fase de grupos que corrió el usuario, y cada cruce lo decide el
+// oráculo igual que en Laboratorio (pasa el favorito, con su probabilidad). Se reusa
+// la misma semilla de esa simulación, así los clasificados del cuadro coinciden
+// exactamente con los de "Fase de grupos". Si aún no se simuló, se pide hacerlo.
 function projectionSection(): string {
+  if (groupProj.size === 0) {
+    return `
+      <section class="panel">
+        <p class="empty" style="margin-bottom:14px">Para armar el cuadro hace falta primero la
+        <b>simulaci&oacute;n de la fase de grupos</b>: de ah&iacute; salen los clasificados que lo siembran.</p>
+        <button class="go" id="proj-runsim">&#8635; Correr simulaci&oacute;n de grupos</button>
+      </section>`;
+  }
   const board = realProjection
     ? renderCuadro(realProjection)
-    : `<div class="panel"><p class="empty">Simulando el cuadro&hellip;</p></div>`;
-  const hint =
-    projMode === "likely"
-      ? `Cuadro <b>m&aacute;s probable</b>: en cada llave pasa el <b>favorito</b> (con su probabilidad de pasar). Es determinista, sale siempre el mismo.`
-      : `<b>Tirada Monte Carlo</b>: cada cruce se juega al azar seg&uacute;n sus probabilidades (con marcador y penales). Cada tirada da un cuadro plausible distinto.`;
-  const btnLabel = projMode === "likely" ? "&#8635; Recalcular" : "&#127922; Otra tirada";
+    : `<div class="panel"><p class="empty">Armando el cuadro&hellip;</p></div>`;
   return `
     <section class="panel">
-      <div class="real-top">
-        <div class="field" style="margin:0">
-          <label>Modo</label>
-          <select id="projmode" class="mode-select">
-            <option value="likely" ${projMode === "likely" ? "selected" : ""}>Cuadro m&aacute;s probable (favorito)</option>
-            <option value="random" ${projMode === "random" ? "selected" : ""}>Tirada Monte Carlo (al azar)</option>
-          </select>
-        </div>
-        <button class="go" id="reroll">${btnLabel}</button>
-      </div>
-      <p class="hint" style="margin:8px 0 0">${hint}</p>
+      <p class="hint" style="margin:0">Cuadro <b>m&aacute;s probable</b>: se siembra con la simulaci&oacute;n de la
+      fase de grupos (${groupProjSims.toLocaleString("es")} sims) y cada cruce lo decide el or&aacute;culo, igual que en
+      <b>Laboratorio</b> (pasa el favorito, con su probabilidad de pasar). Para cambiarlo, volv&eacute; a simular en
+      <b>Fase de grupos</b>.</p>
     </section>
     <div id="projection-board">${board}</div>`;
 }
@@ -926,12 +938,9 @@ function projectionSection(): string {
 async function loadProjection() {
   const board = app.querySelector<HTMLDivElement>("#projection-board");
   if (!board) return;
-  board.innerHTML = `<div class="panel"><p class="empty">${
-    projMode === "likely" ? "Calculando el cuadro m&aacute;s probable" : "Jugando una tirada"
-  }&hellip;</p></div>`;
+  board.innerHTML = `<div class="panel"><p class="empty">Armando el cuadro&hellip;</p></div>`;
   try {
-    realProjection =
-      projMode === "likely" ? await api.likelyBracket(5000) : await api.playBracket(null);
+    realProjection = await api.likelyBracket(groupProjSims || null, groupSimSeed);
     board.innerHTML = renderCuadro(realProjection);
   } catch (e) {
     board.innerHTML = `<div class="panel"><p class="error">No se pudo calcular: ${escape(String(e))}</p></div>`;
@@ -939,20 +948,21 @@ async function loadProjection() {
 }
 
 function wireProjection() {
-  const sel = app.querySelector<HTMLSelectElement>("#projmode");
-  if (sel)
-    sel.addEventListener("change", () => {
-      projMode = sel.value as typeof projMode;
-      realProjection = null; // re-renderiza textos/botón y recalcula en el nuevo modo
-      paintReal();
+  const runBtn = app.querySelector<HTMLButtonElement>("#proj-runsim");
+  if (runBtn) {
+    runBtn.addEventListener("click", async () => {
+      runBtn.disabled = true;
+      runBtn.textContent = "Simulando…";
+      try {
+        await runGroupSim(3000);
+        paintReal(); // ya hay simulación de grupos: se pinta el cuadro sembrado con ella
+      } catch (e) {
+        runBtn.textContent = "Error";
+        runBtn.disabled = false;
+      }
     });
-  const btn = app.querySelector<HTMLButtonElement>("#reroll");
-  if (btn)
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      await loadProjection();
-      btn.disabled = false;
-    });
+    return;
+  }
   if (!realProjection) loadProjection();
 }
 
