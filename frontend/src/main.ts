@@ -376,7 +376,7 @@ function renderReal() {
   render(`
     <section class="panel">
       <h2>Seguimiento real</h2>
-      <p class="hint">Carg&aacute; los marcadores reales o tra&eacute;los con un clic. La fase de grupos define las posiciones; el cuadro se llena solo.</p>
+      <p class="hint">Carg&aacute; los marcadores reales o tra&eacute;los con un clic. Se actualiza solo cada minuto (finalizados y en vivo). La fase de grupos define las posiciones.</p>
       <div class="real-top">
         <nav class="subtabs">
           <button class="subtab ${realSub === "groups" ? "active" : ""}" data-sub="groups">Fase de grupos</button>
@@ -398,6 +398,21 @@ function renderReal() {
   );
   app.querySelector<HTMLButtonElement>("#refresh")!.addEventListener("click", refreshResults);
   loadReal();
+  startAutoPoll();
+}
+
+// Refresco automático cada 60 s mientras se ve la pestaña Real, sin pisar al usuario
+// si está escribiendo un marcador (foco en un input/select).
+let autoPollStarted = false;
+function startAutoPoll() {
+  if (autoPollStarted) return;
+  autoPollStarted = true;
+  window.setInterval(() => {
+    if (view !== "real") return;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === "INPUT" || ae.tagName === "SELECT")) return;
+    loadReal();
+  }, 60000);
 }
 
 async function refreshResults() {
@@ -423,6 +438,7 @@ async function refreshResults() {
 
 async function loadReal() {
   try {
+    await api.refreshResults().catch(() => {}); // trae lo último (finalizados/en vivo) de la fuente
     [realMatches, realState] = await Promise.all([api.matches(), api.realBracket()]);
     if (realPredictions.size === 0) {
       const preds = await api.matchPredictions();
@@ -566,7 +582,7 @@ function resolveOpponent(label: string): string {
 }
 
 function fixtureRow(m: MatchFixture): string {
-  const live = m.status === "live" ? `<span class="fx-live">&#9679; vivo</span>` : "";
+  const live = m.status === "live" ? `<span class="fx-live">vivo</span>` : "";
   return `
     <div class="fx-wrap">
       <div class="fx ${m.status === "live" ? "is-live" : ""}" data-fixture="${escape(m.id)}">
