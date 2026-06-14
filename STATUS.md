@@ -40,19 +40,24 @@ backend/app/
   predictors.py    Escalera de 6 modelos + selector final. Port de Predictors/*
   simulation.py    Motor Montecarlo (grupos + eliminación). Port de Services/Simulation/*
   bracket.py       Cuadro WC2026 + asignación de terceros. Port de WorldCup2026Bracket.cs
+  real_bracket.py  Cuadro REAL: posiciones jugadas + eliminación cargada a mano (sin port)
+  live_results.py  Auto-carga de marcadores reales desde ESPN (keyless) (sin port)
   team_names.py    Normalización de nombres -> id. Port de TeamNameNormalizer.cs
   models.py        ORM SQLAlchemy (MariaDB). Port de DAL/ + Models/
   csv_import.py    Importación de los 4 CSV semilla. Port de CsvImportService.cs
   repository.py    Carga datos de la base y arma contextos de predicción
-  config.py        Settings vía env (prefijo OLORACULO_). Port de OloraculoConfig + appsettings
+  config.py        Settings vía env (prefijo WILLCARLO_). Port de OloraculoConfig + appsettings
   main.py          App FastAPI + endpoints
 backend/data/      Los 4 CSV semilla (grupos, FIFA, Elo, resultados históricos)
 frontend/src/
-  main.ts          Router + vistas Laboratorio y Torneo
+  main.ts          Router + vistas (la principal es "Real"; Lab/Torneo/Bracket siguen en el código)
   api.ts           Cliente tipado de la API
   style.css        Estética "scoreboard"
 docker-compose.yml MariaDB + backend + frontend
 ```
+
+> Nota: `real_bracket.py` y `live_results.py` son agregados propios de este port (no
+> existen en el original .NET). Reutilizan la matemática de `simulation.py` y `bracket.py`.
 
 ## La escalera de modelos (clave del proyecto)
 
@@ -80,8 +85,25 @@ calibración del 15% hacia ese consenso (`RANKING_BIAS_WEIGHT`).
 - `POST /api/tournament/run`: Montecarlo completo con cuadro real de 48 equipos.
   Probabilidades de campeón suman 1.0. Columnas monótonas (campeón < final < semis <
   clasifica). Favoritos sensatos. ~2s cada 2000 simulaciones.
-- Frontend compila con TypeScript estricto y buildea limpio. Vistas Laboratorio y
-  Torneo funcionando contra la API real (verificado en navegador).
+- **Pantalla "Real" (vista principal del frontend).** Sub-pestañas Grupos / Cuadro /
+  Pronóstico / Proyección. Se apoya en:
+  - `POST /api/results/refresh`: auto-carga marcadores reales desde el scoreboard
+    público de ESPN (sin API key). Partido FINALIZADO → `status="final"` (cuenta para
+    posiciones); EN VIVO → `status="live"`; programado → se ignora. Solo toca fixtures
+    de grupos. Auto-refresco cada 60s en la UI con distintivo "VIVO".
+  - `GET /api/bracket/real`: estado del cuadro real (tablas de grupos jugadas +
+    eliminación). Resuelve slots parcialmente (`None` mientras no se conozca el equipo).
+  - `POST/DELETE /api/knockout/{tie_id}/result`: carga/borra a mano el resultado de una
+    llave de eliminación (con penales si hay empate). Valida que la llave sea jugable.
+  - `POST /api/groups/simulate`: Montecarlo por grupo condicionado a lo ya jugado
+    (distribución de puesto, rutas a 16avos, distribución de terceros).
+  - `POST /api/tournament/bracket` y `/bracket/likely`: una tirada del cuadro vs. cuadro
+    más probable (favorito por llave con su probabilidad).
+- Frontend compila con TypeScript estricto y buildea limpio. Verificado en navegador.
+
+> La marca ya está renombrada a **WillCarlo** en todo el código (título FastAPI, `<h1>`,
+> prefijo de env `WILLCARLO_`, DB `willcarlo`). La antigua "TAREA 1" de renombrado está
+> completa; ya no aplica.
 
 ## Comportamientos esperados (NO son bugs)
 
@@ -95,36 +117,30 @@ calibración del 15% hacia ese consenso (`RANKING_BIAS_WEIGHT`).
   para varios). Es consecuencia del modelo Poisson con xg simétricos en cruces parejos
   — captura la "personalidad" azarosa del oloráculo original.
 
-## TAREA 1 (primera, en curso): renombrar la marca a "WillCarlo"
+## Convenciones que NO hay que romper (config / datos)
 
-Cambiar SOLO la marca visible de "Oloráculo" a **WillCarlo**:
-
-- `frontend/src/main.ts` — el `<h1>` del header (busca "Olorác")
-- `frontend/index.html` — el `<title>`
-- `backend/app/main.py` — el `title=` del `FastAPI(...)` (sale en `/docs`)
-
-NO tocar (rompe la config o borra datos del volumen):
-- el prefijo de variables de entorno `OLORACULO_` (`config.py` + `docker-compose.yml`)
-- el nombre de la base de datos `oloraculo`
-- el volumen `db_data`
-- el `name` en `package.json` (interno, opcional)
-
-Mostrar el diff antes de aplicar.
+- el prefijo de variables de entorno `WILLCARLO_` (`config.py` + `docker-compose.yml`)
+- el nombre de la base de datos `willcarlo`
+- el volumen `db_data` (contiene la base ya poblada; borrarlo fuerza reimportar todo)
 
 ## Backlog (pendiente, en orden sugerido)
 
-1. **Pantalla de carga de resultados reales** desde la UI (el endpoint
-   `POST /api/matches/{id}/result` ya existe; falta la vista de fixtures con inputs de
-   marcador). Port de la pantalla `/matches` del original.
-2. **Pantalla de rendimiento/evaluación** con Brier score, RPS y log loss (las métricas
+1. **Pantalla de rendimiento/evaluación** con Brier score, RPS y log loss (las métricas
    ya están en `probability.py`; falta guardar snapshots de predicción y compararlos
    contra resultados reales). Port de `/performance` + `EvaluationService.cs`.
-3. **Paralelizar el Montecarlo** con `multiprocessing` para que 10.000 simulaciones no
+2. **Paralelizar el Montecarlo** con `multiprocessing` para que 10.000 simulaciones no
    tarden ~10s en un solo hilo.
-4. **Conectores de contexto opcionales** (API-Football para lesiones, OpenRouter para
+3. **Conectores de contexto opcionales** (API-Football para lesiones, OpenRouter para
    clasificar noticias) que pueblen la tabla `fixture_contexts` y activen el escalón 5.
-   Los hooks de config (`OLORACULO_API_FOOTBALL_API_KEY`, `OLORACULO_OPENROUTER_API_KEY`)
+   Los hooks de config (`WILLCARLO_API_FOOTBALL_API_KEY`, `WILLCARLO_OPENROUTER_API_KEY`)
    ya están previstos en `config.py`.
+
+## Hecho recientemente (ya no es backlog)
+
+- **Renombrado de marca** Oloráculo → WillCarlo (código + env + DB). Completo.
+- **Carga de resultados reales**: vía ESPN automática (`live_results.py`) y carga manual
+  de eliminación (`real_bracket.py` + `KnockoutResult`). La vista "Real" del frontend
+  consume todo esto. Reemplaza el ítem "pantalla de carga de resultados" del backlog viejo.
 
 ## Referencia del original
 
