@@ -44,6 +44,44 @@ const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 const escape = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
+// Bandera emoji por id de equipo (código ISO 3166-1 alpha-2; Inglaterra y Escocia
+// usan la secuencia de subdivisión "gb-eng"/"gb-sct"). Las 48 del Mundial 2026.
+const TEAM_ISO: Record<string, string> = {
+  czechia: "cz", mexico: "mx", "south-africa": "za", "south-korea": "kr",
+  "bosnia-and-herzegovina": "ba", canada: "ca", qatar: "qa", switzerland: "ch",
+  brazil: "br", haiti: "ht", morocco: "ma", scotland: "gb-sct",
+  australia: "au", paraguay: "py", turkey: "tr", "united-states": "us",
+  curacao: "cw", ecuador: "ec", germany: "de", "ivory-coast": "ci",
+  japan: "jp", netherlands: "nl", sweden: "se", tunisia: "tn",
+  belgium: "be", egypt: "eg", iran: "ir", "new-zealand": "nz",
+  "cape-verde": "cv", "saudi-arabia": "sa", spain: "es", uruguay: "uy",
+  france: "fr", iraq: "iq", norway: "no", senegal: "sn",
+  algeria: "dz", argentina: "ar", austria: "at", jordan: "jo",
+  colombia: "co", "congo-dr": "cd", portugal: "pt", uzbekistan: "uz",
+  croatia: "hr", england: "gb-eng", ghana: "gh", panama: "pa",
+};
+
+// "" si el equipo no está mapeado.
+function flag(teamId: string): string {
+  const code = TEAM_ISO[teamId];
+  if (!code) return "";
+  if (code.includes("-")) {
+    const sub = code.replace("-", ""); // "gb-eng" -> "gbeng"
+    return (
+      String.fromCodePoint(0x1f3f4) +
+      [...sub].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("") +
+      String.fromCodePoint(0xe007f)
+    );
+  }
+  return code.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
+}
+
+// Nombre escapado con su bandera delante (sin bandera si no está mapeada).
+const withFlag = (id: string, name: string) => {
+  const f = flag(id);
+  return `${f ? `<span class="flag">${f}</span> ` : ""}${escape(name)}`;
+};
+
 // --------------------------------------------------------------------------- //
 // Layout
 // --------------------------------------------------------------------------- //
@@ -81,7 +119,7 @@ function render(inner: string) {
 // --------------------------------------------------------------------------- //
 function teamOptions(selected?: string): string {
   return teams
-    .map((t) => `<option value="${t.id}" ${t.id === selected ? "selected" : ""}>${escape(t.name)}</option>`)
+    .map((t) => `<option value="${t.id}" ${t.id === selected ? "selected" : ""}>${withFlag(t.id, t.name)}</option>`)
     .join("");
 }
 
@@ -133,9 +171,9 @@ async function runLab() {
     slot.innerHTML = `
       <section class="panel">
         <div class="scoreline">
-          <div class="team">${escape(res.home.name)}</div>
+          <div class="team">${withFlag(res.home.id, res.home.name)}</div>
           ${xg}
-          <div class="team away">${escape(res.away.name)}</div>
+          <div class="team away">${withFlag(res.away.id, res.away.name)}</div>
         </div>
         ${outcomeBar(f)}
         <div class="ladder">
@@ -242,7 +280,7 @@ function row(t: TournamentTeam, i: number): string {
   return `
     <tr>
       <td class="rank">${i + 1}</td>
-      <td class="team">${escape(t.name)}</td>
+      <td class="team">${withFlag(t.team_id, t.name)}</td>
       <td><span class="grp">${t.group}</span></td>
       <td class="champ">${pct(t.win_tournament)}</td>
       <td class="hide">${pct(t.reach_final)}</td>
@@ -334,7 +372,7 @@ function tieCard(t: BracketTie): string {
   const slot = (s: BracketTie["home"], score: number | null, won: boolean) => `
     <div class="bk-slot ${won ? "win" : "out"}">
       <span class="bk-lab">${escape(s.label)}</span>
-      <span class="bk-nm">${escape(s.name)}</span>
+      <span class="bk-nm">${withFlag(s.team_id, s.name)}</span>
       <span class="bk-sc">${cell(score, won)}</span>
     </div>`;
   return `
@@ -362,7 +400,7 @@ function renderCuadro(res: BracketResponse): string {
     <section class="panel">
       <div class="bk-champ">
         <span class="bk-champ-lab">&#127942; Campe&oacute;n</span>
-        <span class="bk-champ-name">${escape(res.champion.name)}</span>
+        <span class="bk-champ-name">${withFlag(res.champion.team_id, res.champion.name)}</span>
       </div>
       <div class="bk-board">
         ${columns}
@@ -522,7 +560,7 @@ function groupProjBlock(name: string): string {
     .map(
       (t) => `
         <div class="proj-row">
-          <span class="proj-nm">${escape(t.name)}</span>
+          <span class="proj-nm">${withFlag(t.team_id, t.name)}</span>
           <div class="proj-bar">
             ${seg(t.p_pos[0], "p1", "1&ordm;")}${seg(t.p_pos[1], "p2", "2&ordm;")}${seg(t.p_pos[2], "p3", "3&ordm;")}${seg(t.p_pos[3] ?? 0, "p4", "4&ordm;")}
           </div>
@@ -553,7 +591,7 @@ function routesBox(name: string, teams: GroupProjTeam[]): string {
     team && route
       ? `
         <div class="route-row">
-          <div class="route-side"><span class="route-pos">${posLabel}</span> <span class="route-team">${escape(team.name)}</span></div>
+          <div class="route-side"><span class="route-pos">${posLabel}</span> <span class="route-team">${withFlag(team.team_id, team.name)}</span></div>
           <div class="route-vs">vs ${escape(resolveOpponent(route.opponent))}</div>
           <div class="route-tie">cruce ${route.tie_id}</div>
           ${thirdDist(route.tie_id)}
@@ -573,7 +611,7 @@ function thirdDist(tieId: number): string {
   if (!d) return "";
   const groups = d.by_group.map((x) => `3&ordm;${x.group} ${pct(x.p)}`).join(" &middot; ");
   const top = d.by_team[0];
-  const topNote = top ? `<div class="route-top">m&aacute;s prob.: ${escape(top.name)} ${pct(top.p)}</div>` : "";
+  const topNote = top ? `<div class="route-top">m&aacute;s prob.: ${withFlag(top.team_id, top.name)} ${pct(top.p)}</div>` : "";
   return `<div class="route-dist">${groups}</div>${topNote}`;
 }
 
@@ -593,12 +631,11 @@ function fixtureRow(m: MatchFixture): string {
   return `
     <div class="fx-wrap">
       <div class="fx ${m.status === "live" ? "is-live" : ""}" data-fixture="${escape(m.id)}">
-        <span class="fx-team home">${escape(m.home.name)}</span>
-        <input class="fx-score" type="number" min="0" data-side="home" value="${m.home_goals ?? ""}" />
+        <span class="fx-team home">${withFlag(m.home.id, m.home.name)}</span>
+        <span class="fx-score-box">${m.home_goals ?? ""}</span>
         <span class="fx-sep">:</span>
-        <input class="fx-score" type="number" min="0" data-side="away" value="${m.away_goals ?? ""}" />
-        <span class="fx-team away">${escape(m.away.name)} ${live}</span>
-        <button class="fx-save" data-fixture="${escape(m.id)}">Guardar</button>
+        <span class="fx-score-box">${m.away_goals ?? ""}</span>
+        <span class="fx-team away">${withFlag(m.away.id, m.away.name)} ${live}</span>
       </div>
       ${predLine(m)}
     </div>`;
@@ -664,7 +701,7 @@ function standTable(g: RealGroup): string {
           .map(
             (s) => `
           <tr class="${s.position <= 2 ? "qual" : s.position === 3 ? "third" : ""}">
-            <td>${s.position}</td><td>${escape(s.name)}</td><td>${s.points}</td>
+            <td>${s.position}</td><td>${withFlag(s.team_id, s.name)}</td><td>${s.points}</td>
             <td>${s.goal_diff > 0 ? "+" : ""}${s.goal_diff}</td>
           </tr>`
           )
@@ -674,28 +711,6 @@ function standTable(g: RealGroup): string {
 }
 
 function wireGroupInputs() {
-  app.querySelectorAll<HTMLButtonElement>(".fx-save").forEach((btn) =>
-    btn.addEventListener("click", async () => {
-      const row = btn.closest(".fx")!;
-      const home = row.querySelector<HTMLInputElement>('input[data-side="home"]')!.value;
-      const away = row.querySelector<HTMLInputElement>('input[data-side="away"]')!.value;
-      if (home === "" || away === "") {
-        btn.textContent = "marcador?";
-        return;
-      }
-      btn.disabled = true;
-      btn.textContent = "Guardando…";
-      try {
-        await api.setMatchResult(btn.dataset.fixture!, parseInt(home, 10), parseInt(away, 10));
-        [realMatches, realState] = await Promise.all([api.matches(), api.realBracket()]);
-        paintReal();
-      } catch (e) {
-        btn.textContent = "Error";
-        btn.disabled = false;
-      }
-    })
-  );
-
   const gbtn = app.querySelector<HTMLButtonElement>("#gsim");
   if (gbtn)
     gbtn.addEventListener("click", async () => {
@@ -750,7 +765,7 @@ function realTieCard(t: RealTie): string {
   const slot = (s: RealSlot, won: boolean) => `
     <div class="bk-slot ${won ? "win" : ""} ${s.team_id ? "" : "empty"}">
       <span class="bk-lab">${escape(s.label)}</span>
-      <span class="bk-nm">${s.name ? escape(s.name) : "&mdash;"}</span>
+      <span class="bk-nm">${s.name ? withFlag(s.team_id ?? "", s.name) : "&mdash;"}</span>
     </div>`;
   const homeWon = t.winner_id != null && t.winner_id === t.home.team_id;
   const awayWon = t.winner_id != null && t.winner_id === t.away.team_id;
@@ -787,7 +802,7 @@ function bracketSection(res: RealBracketResponse): string {
     })
     .join("");
   const champ = res.champion
-    ? `<span class="bk-champ-name">${escape(res.champion.name)}</span>`
+    ? `<span class="bk-champ-name">${withFlag(res.champion.team_id, res.champion.name)}</span>`
     : `<span class="bk-champ-pending">por definir</span>`;
   const note = res.groups_complete
     ? ""
@@ -876,7 +891,7 @@ function forecastTable(res: TournamentResponse): string {
             (t, i) => `
           <tr>
             <td class="rank">${i + 1}</td>
-            <td class="team">${escape(t.name)}</td>
+            <td class="team">${withFlag(t.team_id, t.name)}</td>
             <td class="champ">${pct(t.win_tournament)}</td>
             <td class="hide">${pct(t.reach_final)}</td>
             <td class="hide">${pct(t.reach_semi_final)}</td>

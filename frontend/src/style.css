@@ -48,6 +48,7 @@ body {
 
 /* Controls */
 .controls { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.flag { font-size: 1.1em; line-height: 1; vertical-align: -1px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field label { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
 select, input[type="number"] {
@@ -149,7 +150,7 @@ tbody tr:hover { background: var(--panel-2); }
 .fx-live { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 9px; font-weight: 700; color: #fff; background: #d8342f; padding: 2px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.08em; vertical-align: middle; }
 .fx-live::before { content: "\25CF"; font-size: 8px; animation: livepulse 1.1s ease-in-out infinite; }
 @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
-.fx.is-live .fx-score { border-color: #d8342f; color: #ff7a76; font-weight: 700; }
+.fx.is-live .fx-score-box { border-color: #d8342f; color: #ff7a76; font-weight: 700; }
 .subtab { font-family: var(--mono); font-size: 12px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
 .subtab:hover { color: var(--chalk); border-color: var(--grass); }
 .subtab.active { background: var(--panel-2); color: var(--chalk); border-color: var(--grass); }
@@ -165,14 +166,14 @@ tbody tr:hover { background: var(--panel-2); }
 .fx-graded { display: inline-block; align-self: center; padding: 2px 8px; border-radius: 999px; }
 .fx-graded b { color: inherit; }
 .fx-xg { opacity: 0.85; }
-.fx { display: grid; grid-template-columns: 1fr 44px 10px 44px 1fr auto; align-items: center; gap: 8px; }
+.fx { display: grid; grid-template-columns: 1fr 44px 10px 44px 1fr; align-items: center; gap: 8px; }
 .fx-team { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fx-team.home { text-align: right; }
 .fx-score { min-width: 0 !important; width: 44px; padding: 6px 4px !important; text-align: center; font-family: var(--mono); }
+.fx-score-box { width: 44px; height: 32px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 15px; color: var(--chalk);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; }
 .fx-sep { text-align: center; color: var(--muted); }
-.fx-save { font-family: var(--mono); font-size: 11px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel-2); color: var(--chalk); cursor: pointer; }
-.fx-save:hover { border-color: var(--grass); }
-.fx-save:disabled { opacity: 0.6; cursor: default; }
 
 .gsim-ctl { display: flex; gap: 8px; align-items: center; }
 .gsim-ctl .fx-score { width: 72px; }
