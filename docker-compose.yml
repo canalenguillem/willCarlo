@@ -1,3 +1,5 @@
+name: oloraculo-py
+
 services:
   db:
     image: mariadb:11
@@ -28,7 +30,7 @@ services:
       WILLCARLO_SIMULATION_COUNT: ${WILLCARLO_SIMULATION_COUNT:-10000}
       WILLCARLO_SIMULATION_SEED: ${WILLCARLO_SIMULATION_SEED:-2026}
     ports:
-      - "8000:8000"
+      - "18000:8000"
 
   frontend:
     build: ./frontend
@@ -36,7 +38,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "5173:80"
+      - "55173:80"
 
 volumes:
   db_data:
