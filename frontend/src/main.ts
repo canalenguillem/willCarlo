@@ -667,22 +667,30 @@ function predLine(m: MatchFixture): string {
     </div>`;
 }
 
-// Acento de acierto para un partido YA JUGADO: compara el marcador pronosticado con
-// el real. Coincidencia exacta -> verde; si no, naranja->rojo según cuánto se aleje
-// (poca diferencia = rojo tirando a naranja; mucha = rojo pleno). Sin jugar -> sin color.
+// Acento de acierto para un partido YA JUGADO. Manda el RESULTADO (1-X-2), no el margen:
+//   - marcador exacto                          -> verde intenso
+//   - resultado acertado (gana quien tocaba / empate), marcador no exacto -> verde claro
+//   - resultado fallado                        -> naranja->rojo según se aleje el marcador
+// Así una goleada del favorito (acertó quién gana) no sale roja por fallar el marcador.
 function scoreAccent(m: MatchFixture, pred: [number, number] | null): { cls: string; style: string; note: string } {
   if (!m.is_played || m.home_goals == null || m.away_goals == null || !pred) {
     return { cls: "", style: "", note: "" };
   }
   const dist = Math.abs(pred[0] - m.home_goals) + Math.abs(pred[1] - m.away_goals);
+  const realOutcome = Math.sign(m.home_goals - m.away_goals);   // 1 local · 0 empate · -1 visita
+  const predOutcome = Math.sign(pred[0] - pred[1]);             // el que implica el marcador pronosticado
+
   let h: number, s: number, l: number, note: string;
   if (dist === 0) {
-    h = 140; s = 70; l = 55; // verde: marcador exacto
+    h = 140; s = 70; l = 52; // verde intenso: marcador exacto
     note = "Marcador exacto acertado";
+  } else if (predOutcome === realOutcome) {
+    h = 110; s = 55; l = 62; // verde claro: acertó el resultado, no el marcador
+    note = "Resultado acertado (marcador no exacto)";
   } else {
     h = Math.max(0, 22 - (dist - 1) * 8); // 22 (rojo-naranja) -> 0 (rojo) según se aleja
     s = 90; l = 60;
-    note = `Marcador a ${dist} gol${dist === 1 ? "" : "es"} del real`;
+    note = `Resultado fallado · marcador a ${dist} gol${dist === 1 ? "" : "es"} del real`;
   }
   const color = `hsl(${h} ${s}% ${l}%)`;
   const bg = `hsl(${h} ${s}% ${l}% / 0.14)`;
