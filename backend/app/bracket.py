@@ -7,8 +7,10 @@ las posiciones reservadas mediante backtracking.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 
 class SlotKind(Enum):
@@ -95,57 +97,39 @@ SEMI_FINALS: list[BracketTie] = [
 FINAL = BracketTie(104, "Final", _winner_of(101), _winner_of(102))
 
 
-def assign_third_place_groups(qualified_third_groups: list[str]) -> dict[int, str]:
-    """Asigna los 8 grupos con mejor tercero a los slots GROUP_THIRD del Round of 32.
+# Tabla OFICIAL de asignación de terceros de FIFA (Annexe C de las Regulations 2026):
+# las 495 combinaciones posibles de 8 grupos-tercero y a qué llave va cada uno.
+# Reproducción verificada contra el PDF oficial (dw-football/wc2026-bracket).
+# Formato: clave = 8 letras de grupo ordenadas (p.ej. "BDEFIJKL"); valor = {"1X": grupo},
+# donde 1X es el ganador de grupo que enfrenta a ese tercero.
+_THIRD_ALLOCATION: dict[str, dict[str, str]] = json.loads(
+    (Path(__file__).parent / "third_place_allocation.json").read_text(encoding="utf-8")
+)
 
-    Igual que el original: ordena los slots por la cantidad de opciones disponibles
-    (más restringidos primero) y resuelve por backtracking."""
+# Ganador de grupo (1X) -> id de la llave de dieciseisavos donde juega contra un tercero.
+_WINNER_POS_TO_TIE: dict[str, int] = {
+    "1A": 79, "1B": 85, "1D": 81, "1E": 74, "1G": 82, "1I": 77, "1K": 87, "1L": 80,
+}
+
+
+def assign_third_place_groups(qualified_third_groups: list[str]) -> dict[int, str]:
+    """Asigna los 8 grupos con mejor tercero a los slots GROUP_THIRD del Round of 32
+    según la tabla OFICIAL de FIFA (no por backtracking, que daba una asignación válida
+    pero distinta a la de FIFA).
+
+    Devuelve {tie_id: letra_de_grupo} para las 8 llaves que llevan un tercero."""
     if len(qualified_third_groups) != 8:
         raise ValueError(
             f"El cuadro 2026 requiere exactamente ocho grupos con terceros clasificados, "
             f"pero recibió {len(qualified_third_groups)}."
         )
-    qualified = {g.upper() for g in qualified_third_groups}
-
-    third_slots = []
-    for tie in ROUND_OF_32:
-        opts = None
-        if tie.home.kind == SlotKind.GROUP_THIRD:
-            opts = tie.home.third_options
-        elif tie.away.kind == SlotKind.GROUP_THIRD:
-            opts = tie.away.third_options
-        if opts is not None:
-            third_slots.append((tie.id, list(opts)))
-
-    third_slots.sort(key=lambda s: (sum(1 for g in s[1] if g.upper() in qualified), s[0]))
-
-    assigned: dict[int, str] = {}
-    used: set[str] = set()
-
-    def group_order(g: str) -> int:
-        return ord(g[0]) - ord("A") if g else 10**9
-
-    def try_assign(index: int) -> bool:
-        if index == len(third_slots):
-            return True
-        tie_id, options = third_slots[index]
-        for group in sorted((g for g in options if g.upper() in qualified), key=group_order):
-            if group.upper() in used:
-                continue
-            assigned[tie_id] = group
-            used.add(group.upper())
-            if try_assign(index + 1):
-                return True
-            del assigned[tie_id]
-            used.discard(group.upper())
-        return False
-
-    if not try_assign(0):
+    key = "".join(sorted(g.upper() for g in qualified_third_groups))
+    row = _THIRD_ALLOCATION.get(key)
+    if row is None:
         raise ValueError(
-            f"No se pudieron asignar los grupos de terceros {sorted(qualified_third_groups)} "
-            f"a los cruces oficiales de 2026."
+            f"Combinación de grupos-tercero no reconocida en la tabla oficial de FIFA: {key}."
         )
-    return assigned
+    return {_WINNER_POS_TO_TIE[winner_pos]: group.upper() for winner_pos, group in row.items()}
 
 
 def _opponent_label(slot: BracketSlot) -> str:
