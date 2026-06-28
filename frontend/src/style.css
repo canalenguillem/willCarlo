@@ -229,3 +229,33 @@ tbody tr:hover { background: var(--panel-2); }
 @media (max-width: 720px) {
   .grp-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- Cuadro clásico (bracket simétrico con trofeo) ---------- */
+.cb-wrap { position: relative; display: flex; align-items: center; justify-content: center;
+  gap: 8px; padding: 14px 6px; overflow-x: auto; }
+.cb-svg { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; overflow: visible; }
+.cb-svg polyline { fill: none; stroke: var(--grass); stroke-width: 2; }
+.cb-side { display: flex; gap: 30px; position: relative; z-index: 1; }
+.cb-round { display: flex; flex-direction: column; justify-content: space-around; height: 760px; }
+.cb-match { position: relative; width: 104px; }
+.cb-box { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.cb-box.pend { min-height: 46px; opacity: 0.45; }
+.cb-team { display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 0 8px; height: 23px; font-family: var(--mono); font-size: 12px; color: var(--chalk); }
+.cb-team + .cb-team { border-top: 1px solid var(--line); }
+.cb-team.win { color: var(--grass-bright); font-weight: 700; }
+.cb-team.pend { color: var(--muted); font-weight: 400; }
+.cb-right .cb-team { flex-direction: row-reverse; }
+.cb-ab { letter-spacing: 0.03em; }
+.cb-fl { font-size: 1.05em; line-height: 1; }
+.cb-when { position: absolute; top: 100%; left: 0; right: 0; text-align: center;
+  font-family: var(--mono); font-size: 9px; color: var(--muted); padding-top: 2px; white-space: nowrap; }
+.cb-center { display: flex; flex-direction: column; align-items: center; gap: 10px;
+  position: relative; z-index: 1; padding: 0 10px; }
+.cb-center .cb-when { display: none; }
+.cb-trophy { font-size: 48px; line-height: 1; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55)); }
+.cb-center .cb-match { width: 134px; }
+.cb-center .cb-team { height: 26px; font-size: 13px; }
+.cb-final-when { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--grass-bright); }
+.cb-champ-pill { font-family: var(--mono); font-size: 13px; color: var(--chalk);
+  background: var(--panel-2); border: 1px solid var(--grass); border-radius: 999px; padding: 5px 14px; }

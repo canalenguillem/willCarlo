@@ -2,7 +2,6 @@ import "./style.css";
 import {
   api,
   type BracketResponse,
-  type BracketTie,
   type GroupProjTeam,
   type GroupRoute,
   type MatchFixture,
@@ -322,7 +321,7 @@ async function playBracket() {
 
   try {
     const res = await api.likelyBracket(Number.isNaN(sims) ? null : sims);
-    slot.innerHTML = renderCuadro(res);
+    paintCuadro(slot, res);
   } catch (e) {
     slot.innerHTML = `<div class="panel"><p class="error">No se pudo calcular el cuadro: ${escape(String(e))}</p></div>`;
   } finally {
@@ -330,27 +329,50 @@ async function playBracket() {
   }
 }
 
-// Ordena cada ronda siguiendo el árbol desde la final (DFS local-luego-visitante),
-// para que las llaves de columnas contiguas queden alineadas verticalmente.
-function bracketColumns(res: BracketResponse): BracketTie[][] {
-  const ko = res.knockout;
-  const byId = new Map<number, BracketTie>();
-  [...ko.round_of_32, ...ko.round_of_16, ...ko.quarter_finals, ...ko.semi_finals, ko.final].forEach((t) =>
-    byId.set(t.tie_id, t)
-  );
-  const rounds: BracketTie[][] = [[], [], [], [], []]; // 0=final ... 4=R32
-  const feederId = (label: string) => (label.startsWith("W") ? parseInt(label.slice(1), 10) : null);
+// --------------------------------------------------------------------------- //
+// Cuadro clásico (bracket simétrico con trofeo). Datos estáticos:
+//  - abreviaturas de 3 letras en español
+//  - horario oficial de cada llave en hora peninsular (verano = CET+1 = UTC+2)
+//  - estructura de llaves por lado (oficial 2026) para el orden vertical
+// --------------------------------------------------------------------------- //
+const TEAM_ABBR: Record<string, string> = {
+  germany: "ALE", paraguay: "PAR", france: "FRA", sweden: "SUE",
+  "south-africa": "SUD", canada: "CAN", netherlands: "PBJ", morocco: "MAR",
+  portugal: "POR", croatia: "CRO", spain: "ESP", austria: "AUT",
+  "united-states": "USA", "bosnia-and-herzegovina": "BYH", belgium: "BEL", senegal: "SEN",
+  brazil: "BRA", japan: "JAP", "ivory-coast": "CDM", norway: "NOR",
+  mexico: "MEX", ecuador: "ECU", england: "ING", "congo-dr": "RDC",
+  argentina: "ARG", "cape-verde": "CBV", australia: "AUS", egypt: "EGI",
+  switzerland: "SUI", algeria: "AGL", colombia: "COL", ghana: "GHA",
+  czechia: "CHQ", qatar: "QAT", scotland: "ESC", turkey: "TUR",
+  curacao: "CUR", tunisia: "TUN", iran: "IRN", "new-zealand": "NZL",
+  "saudi-arabia": "ARA", uruguay: "URU", iraq: "IRK", jordan: "JOR",
+  uzbekistan: "UZB", panama: "PAN", haiti: "HAI", "south-korea": "COR",
+};
+const abbr = (id: string, name: string) => TEAM_ABBR[id] ?? name.slice(0, 3).toUpperCase();
 
-  const walk = (tie: BracketTie, depth: number) => {
-    rounds[depth].push(tie);
-    for (const lab of [tie.home.label, tie.away.label]) {
-      const id = feederId(lab);
-      if (id != null && byId.has(id)) walk(byId.get(id)!, depth + 1);
-    }
-  };
-  walk(ko.final, 0);
-  return [rounds[4], rounds[3], rounds[2], rounds[1], rounds[0]]; // izq->der: R32..Final
-}
+// Fecha y hora de cada llave en hora peninsular española.
+const KO_CET: Record<number, string> = {
+  73: "28/6 21:00", 74: "29/6 22:30", 75: "30/6 03:00", 76: "29/6 19:00",
+  77: "30/6 23:00", 78: "30/6 19:00", 79: "1/7 03:00", 80: "1/7 18:00",
+  81: "2/7 02:00", 82: "1/7 22:00", 83: "3/7 01:00", 84: "2/7 21:00",
+  85: "3/7 05:00", 86: "4/7 00:00", 87: "4/7 03:30", 88: "3/7 20:00",
+  89: "4/7 23:00", 90: "4/7 19:00", 91: "5/7 22:00", 92: "6/7 02:00",
+  93: "6/7 21:00", 94: "7/7 02:00", 95: "7/7 18:00", 96: "7/7 22:00",
+  97: "9/7 22:00", 98: "10/7 21:00", 99: "11/7 23:00", 100: "12/7 03:00",
+  101: "14/7 21:00", 102: "15/7 21:00", 104: "19/7 21:00",
+};
+
+// Orden de llaves por lado, de arriba a abajo, en cada ronda.
+const CB_LEFT = { r32: [74, 77, 73, 75, 83, 84, 81, 82], r16: [89, 90, 93, 94], qf: [97, 98], sf: [101] };
+const CB_RIGHT = { r32: [76, 78, 79, 80, 86, 88, 85, 87], r16: [91, 92, 95, 96], qf: [99, 100], sf: [102] };
+// Llave receptora -> sus dos alimentadoras (para trazar las líneas verdes).
+const CB_FEED: Record<number, [number, number]> = {
+  89: [74, 77], 90: [73, 75], 93: [83, 84], 94: [81, 82],
+  91: [76, 78], 92: [79, 80], 95: [86, 88], 96: [85, 87],
+  97: [89, 90], 98: [93, 94], 99: [91, 92], 100: [95, 96],
+  101: [97, 98], 102: [99, 100], 104: [101, 102],
+};
 
 const STAGE_TITLES: Record<string, string> = {
   RoundOf32: "Dieciseisavos",
@@ -360,57 +382,117 @@ const STAGE_TITLES: Record<string, string> = {
   Final: "Final",
 };
 
-function tieCard(t: BracketTie): string {
-  const homeWon = t.winner_id === t.home.team_id;
-  // Marcador si es una corrida; si es el cuadro "más probable", la prob. del ganador.
-  const cell = (score: number | null, won: boolean) =>
-    score != null
-      ? `${score}`
-      : won && t.win_prob != null
-      ? `<span class="bk-wp">${Math.round(t.win_prob * 100)}%</span>`
-      : "";
-  const slot = (s: BracketTie["home"], score: number | null, won: boolean) => `
-    <div class="bk-slot ${won ? "win" : "out"}">
-      <span class="bk-lab">${escape(s.label)}</span>
-      <span class="bk-nm">${withFlag(s.team_id, s.name)}</span>
-      <span class="bk-sc">${cell(score, won)}</span>
-    </div>`;
-  return `
-    <div class="bk-tie">
-      ${slot(t.home, t.home_score, homeWon)}
-      ${slot(t.away, t.away_score, !homeWon)}
-      ${t.penalties ? `<span class="bk-pen">pen.</span>` : ""}
-    </div>`;
+// Una llave genérica (sirve para el cuadro probable y para una corrida).
+type AnyTie = {
+  tie_id: number;
+  home: { team_id: string | null; name: string | null; label: string };
+  away: { team_id: string | null; name: string | null; label: string };
+  winner_id?: string | null;
+};
+
+function cbTeamRow(s: AnyTie["home"], winnerId: string | null | undefined): string {
+  const won = !!s.team_id && s.team_id === winnerId;
+  const label = s.team_id ? abbr(s.team_id, s.name ?? s.team_id) : escape(s.label);
+  const fl = s.team_id ? `<span class="cb-fl">${flag(s.team_id)}</span>` : "";
+  return `<div class="cb-team ${won ? "win" : ""} ${s.team_id ? "" : "pend"}"><span class="cb-ab">${label}</span>${fl}</div>`;
+}
+
+function cbMatch(ties: Map<number, AnyTie>, tieId: number, side: string): string {
+  const t = ties.get(tieId);
+  const when = KO_CET[tieId] ? `<div class="cb-when">${KO_CET[tieId]}</div>` : "";
+  const cls = `cb-match cb-${side}`;
+  if (!t) return `<div class="${cls}" data-tie="${tieId}"><div class="cb-box pend"></div>${when}</div>`;
+  return `<div class="${cls}" data-tie="${tieId}">
+    <div class="cb-box">${cbTeamRow(t.home, t.winner_id)}${cbTeamRow(t.away, t.winner_id)}</div>${when}</div>`;
+}
+
+function cbRound(ties: Map<number, AnyTie>, ids: number[], side: string, cls: string): string {
+  return `<div class="cb-round ${cls}">${ids.map((id) => cbMatch(ties, id, side)).join("")}</div>`;
 }
 
 function renderCuadro(res: BracketResponse): string {
-  const cols = bracketColumns(res);
-  const columns = cols
-    .map((ties) => {
-      const stage = ties[0]?.stage ?? "";
-      return `
-        <div class="bk-col">
-          <div class="bk-head">${STAGE_TITLES[stage] ?? stage}</div>
-          <div class="bk-col-body">${ties.map(tieCard).join("")}</div>
-        </div>`;
-    })
-    .join("");
+  const ko = res.knockout;
+  const ties = new Map<number, AnyTie>();
+  [...ko.round_of_32, ...ko.round_of_16, ...ko.quarter_finals, ...ko.semi_finals, ko.final].forEach((t) =>
+    ties.set(t.tie_id, t as AnyTie)
+  );
+  const champ = res.champion?.team_id
+    ? `<div class="cb-champ-pill">&#127942; ${withFlag(res.champion.team_id, res.champion.name)}</div>`
+    : "";
+  const meta =
+    res.simulations != null
+      ? `Cuadro m&aacute;s probable &middot; ${res.simulations.toLocaleString("es")} sims`
+      : `Una corrida &middot; semilla ${res.seed ?? "aleatoria"}`;
 
   return `
     <section class="panel">
-      <div class="bk-champ">
-        <span class="bk-champ-lab">&#127942; Campe&oacute;n</span>
-        <span class="bk-champ-name">${withFlag(res.champion.team_id, res.champion.name)}</span>
+      <div class="cb-wrap">
+        <svg class="cb-svg"></svg>
+        <div class="cb-side cb-side-left">
+          ${cbRound(ties, CB_LEFT.r32, "left", "cb-r32")}
+          ${cbRound(ties, CB_LEFT.r16, "left", "cb-r16")}
+          ${cbRound(ties, CB_LEFT.qf, "left", "cb-qf")}
+          ${cbRound(ties, CB_LEFT.sf, "left", "cb-sf")}
+        </div>
+        <div class="cb-center">
+          <div class="cb-trophy">&#127942;</div>
+          ${cbMatch(ties, 104, "final")}
+          <div class="cb-final-when">FINAL &middot; ${KO_CET[104] ?? ""}</div>
+          ${champ}
+        </div>
+        <div class="cb-side cb-side-right">
+          ${cbRound(ties, CB_RIGHT.sf, "right", "cb-sf")}
+          ${cbRound(ties, CB_RIGHT.qf, "right", "cb-qf")}
+          ${cbRound(ties, CB_RIGHT.r16, "right", "cb-r16")}
+          ${cbRound(ties, CB_RIGHT.r32, "right", "cb-r32")}
+        </div>
       </div>
-      <div class="bk-board">
-        ${columns}
-      </div>
-      <p class="meta">${
-        res.simulations != null
-          ? `Cuadro m&aacute;s probable &middot; ${res.simulations.toLocaleString("es")} simulaciones`
-          : `Una corrida &middot; semilla ${res.seed ?? "aleatoria"}`
-      } &middot; ${res.elapsed_ms} ms</p>
+      <p class="meta">${meta} &middot; ${res.elapsed_ms} ms &middot; horarios en hora peninsular (CET)</p>
     </section>`;
+}
+
+// Dibuja las líneas verdes midiendo las cajas ya renderizadas (robusto a cualquier
+// espaciado). Se llama tras insertar el HTML y al redimensionar la ventana.
+function drawConnectors(wrap: Element | null): void {
+  if (!wrap) return;
+  const svg = wrap.querySelector("svg.cb-svg");
+  if (!svg) return;
+  const base = wrap.getBoundingClientRect();
+  const sx = (wrap as HTMLElement).scrollLeft;
+  const sy = (wrap as HTMLElement).scrollTop;
+  const box = (tie: number) => {
+    const el = wrap.querySelector(`[data-tie="${tie}"] .cb-box`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      left: r.left - base.left + sx,
+      right: r.right - base.left + sx,
+      midY: r.top - base.top + sy + r.height / 2,
+    };
+  };
+  const lines: string[] = [];
+  for (const recv of Object.keys(CB_FEED)) {
+    const R = box(+recv);
+    if (!R) continue;
+    for (const f of CB_FEED[+recv]) {
+      const F = box(f);
+      if (!F) continue;
+      const feederLeft = F.right <= R.left + 1;
+      const fx = feederLeft ? F.right : F.left;
+      const rx = feederLeft ? R.left : R.right;
+      const mx = (fx + rx) / 2;
+      lines.push(`<polyline points="${fx},${F.midY} ${mx},${F.midY} ${mx},${R.midY} ${rx},${R.midY}"/>`);
+    }
+  }
+  svg.innerHTML = lines.join("");
+  svg.setAttribute("width", String((wrap as HTMLElement).scrollWidth));
+  svg.setAttribute("height", String((wrap as HTMLElement).scrollHeight));
+}
+
+// Inserta el cuadro en un contenedor y traza las líneas tras el layout.
+function paintCuadro(host: HTMLElement, res: BracketResponse): void {
+  host.innerHTML = renderCuadro(res);
+  requestAnimationFrame(() => drawConnectors(host.querySelector(".cb-wrap")));
 }
 
 // --------------------------------------------------------------------------- //
@@ -964,7 +1046,7 @@ async function loadProjection() {
   board.innerHTML = `<div class="panel"><p class="empty">Armando el cuadro&hellip;</p></div>`;
   try {
     realProjection = await api.likelyBracket(groupProjSims || null, groupSimSeed);
-    board.innerHTML = renderCuadro(realProjection);
+    paintCuadro(board, realProjection);
   } catch (e) {
     board.innerHTML = `<div class="panel"><p class="error">No se pudo calcular: ${escape(String(e))}</p></div>`;
   }
@@ -987,6 +1069,8 @@ function wireProjection() {
     return;
   }
   if (!realProjection) loadProjection();
+  // El cuadro ya venía embebido por projectionSection: traza sus líneas tras el layout.
+  else requestAnimationFrame(() => drawConnectors(app.querySelector("#projection-board .cb-wrap")));
 }
 
 // --------------------------------------------------------------------------- //
@@ -1004,5 +1088,10 @@ async function boot() {
     );
   }
 }
+
+// Redibuja las líneas de cualquier cuadro visible al cambiar el tamaño de la ventana.
+window.addEventListener("resize", () => {
+  document.querySelectorAll(".cb-wrap").forEach((w) => drawConnectors(w));
+});
 
 boot();
