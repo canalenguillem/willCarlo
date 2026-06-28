@@ -32,10 +32,6 @@ let thirdSlots: Record<string, ThirdSlot> = {};
 let groupProjSims = 0;
 let realForecast: TournamentResponse | null = null;
 let realProjection: BracketResponse | null = null;
-// Semilla de la última simulación de grupos: el cuadro probable se siembra con ESA
-// misma simulación (mismo seed + nº de sims => clasificados idénticos a los de
-// "Fase de grupos"). null = todavía no se corrió.
-let groupSimSeed: number | null = null;
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -425,7 +421,7 @@ function renderCuadro(res: BracketResponse): string {
       : `Una corrida &middot; semilla ${res.seed ?? "aleatoria"}`;
 
   return `
-    <section class="panel">
+    <section class="panel cb-panel">
       <div class="cb-wrap">
         <svg class="cb-svg"></svg>
         <div class="cb-side cb-side-left">
@@ -552,6 +548,7 @@ async function refreshResults() {
     [realMatches, realState] = await Promise.all([api.matches(), api.realBracket()]);
     paintReal();
     const parts = [`${r.updated.length} finalizados`, `${r.live.length} en vivo`];
+    if (r.knockout.length) parts.push(`${r.knockout.length} eliminatorias`);
     if (r.unmatched.length) parts.push(`${r.unmatched.length} sin emparejar`);
     msg.textContent = `Actualizado: ${parts.join(" · ")}.${r.live.length ? " En vivo: " + r.live.join(", ") : ""}`;
   } catch (e) {
@@ -826,7 +823,6 @@ async function runGroupSim(sims: number | null): Promise<void> {
   groupRoutes = new Map(res.groups.map((g) => [g.name, g.routes ?? {}]));
   thirdSlots = res.third_slots ?? {};
   groupProjSims = res.simulations;
-  groupSimSeed = seed;
   realProjection = null; // el cuadro debe recomputarse desde la nueva simulación
 }
 
@@ -1013,29 +1009,22 @@ function wireForecast() {
   });
 }
 
-// Cuadro de 16avos -> final, DETERMINISTA: la siembra (clasificados) sale de la
-// simulación de la fase de grupos que corrió el usuario, y cada cruce lo decide el
-// oráculo igual que en Laboratorio (pasa el favorito, con su probabilidad). Se reusa
-// la misma semilla de esa simulación, así los clasificados del cuadro coinciden
-// exactamente con los de "Fase de grupos". Si aún no se simuló, se pide hacerlo.
+// Cuadro de 16avos -> final a partir de los resultados REALES. Con la fase de grupos
+// cerrada, los clasificados son los reales (no hay que simular nada); cada cruce ya
+// jugado lo decide el resultado real (pasa el ganador real) y los pendientes los
+// decide el oráculo (favorito, igual que en Laboratorio).
 function projectionSection(): string {
-  if (groupProj.size === 0) {
-    return `
-      <section class="panel">
-        <p class="empty" style="margin-bottom:14px">Para armar el cuadro hace falta primero la
-        <b>simulaci&oacute;n de la fase de grupos</b>: de ah&iacute; salen los clasificados que lo siembran.</p>
-        <button class="go" id="proj-runsim">&#8635; Correr simulaci&oacute;n de grupos</button>
-      </section>`;
-  }
   const board = realProjection
     ? renderCuadro(realProjection)
-    : `<div class="panel"><p class="empty">Armando el cuadro&hellip;</p></div>`;
+    : `<div class="panel"><p class="empty">Buscando resultados reales y armando el cuadro&hellip;</p></div>`;
   return `
     <section class="panel">
-      <p class="hint" style="margin:0">Cuadro <b>m&aacute;s probable</b>: se siembra con la simulaci&oacute;n de la
-      fase de grupos (${groupProjSims.toLocaleString("es")} sims) y cada cruce lo decide el or&aacute;culo, igual que en
-      <b>Laboratorio</b> (pasa el favorito, con su probabilidad de pasar). Para cambiarlo, volv&eacute; a simular en
-      <b>Fase de grupos</b>.</p>
+      <div class="real-top">
+        <p class="hint" style="margin:0">Cuadro a partir de los <b>resultados reales</b>: en las llaves ya jugadas
+        pasa el <b>ganador real</b>; en las pendientes, el <b>favorito</b> seg&uacute;n el or&aacute;culo (igual que en
+        Laboratorio). Los clasificados salen de la fase de grupos ya cerrada.</p>
+        <button class="go" id="proj-refresh">&#8635; Actualizar</button>
+      </div>
     </section>
     <div id="projection-board">${board}</div>`;
 }
@@ -1043,9 +1032,10 @@ function projectionSection(): string {
 async function loadProjection() {
   const board = app.querySelector<HTMLDivElement>("#projection-board");
   if (!board) return;
-  board.innerHTML = `<div class="panel"><p class="empty">Armando el cuadro&hellip;</p></div>`;
+  board.innerHTML = `<div class="panel"><p class="empty">Buscando resultados reales y armando el cuadro&hellip;</p></div>`;
   try {
-    realProjection = await api.likelyBracket(groupProjSims || null, groupSimSeed);
+    await api.refreshResults().catch(() => {}); // trae lo último (finalizados/en vivo) de ESPN
+    realProjection = await api.likelyBracket(1000, null);
     paintCuadro(board, realProjection);
   } catch (e) {
     board.innerHTML = `<div class="panel"><p class="error">No se pudo calcular: ${escape(String(e))}</p></div>`;
@@ -1053,21 +1043,14 @@ async function loadProjection() {
 }
 
 function wireProjection() {
-  const runBtn = app.querySelector<HTMLButtonElement>("#proj-runsim");
-  if (runBtn) {
-    runBtn.addEventListener("click", async () => {
-      runBtn.disabled = true;
-      runBtn.textContent = "Simulando…";
-      try {
-        await runGroupSim(3000);
-        paintReal(); // ya hay simulación de grupos: se pinta el cuadro sembrado con ella
-      } catch (e) {
-        runBtn.textContent = "Error";
-        runBtn.disabled = false;
-      }
+  const btn = app.querySelector<HTMLButtonElement>("#proj-refresh");
+  if (btn)
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      realProjection = null;
+      await loadProjection();
+      btn.disabled = false;
     });
-    return;
-  }
   if (!realProjection) loadProjection();
   // El cuadro ya venía embebido por projectionSection: traza sus líneas tras el layout.
   else requestAnimationFrame(() => drawConnectors(app.querySelector("#projection-board .cb-wrap")));

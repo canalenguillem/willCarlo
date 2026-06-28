@@ -72,6 +72,7 @@ export interface BracketTie {
   winner_name: string;
   penalties: boolean;
   win_prob?: number; // presente en el cuadro "más probable": prob. de que el ganador pase
+  real?: boolean; // la llave se resolvió con un resultado REAL (no con el favorito)
 }
 
 export interface BracketStanding {
@@ -149,6 +150,7 @@ export interface RefreshSummary {
   live: string[];
   skipped: number;
   unmatched: string[];
+  knockout: string[]; // resultados de eliminatorias volcados en sus llaves
 }
 
 export interface RealSlot {

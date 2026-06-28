@@ -64,7 +64,7 @@ def _fetch_events(dates: str = TOURNAMENT_DATES) -> list[dict]:
 
 
 def refresh_group_results(db: Session) -> dict:
-    """Trae el scoreboard y actualiza los fixtures de grupos. Devuelve un resumen."""
+    """Trae el scoreboard y actualiza fixtures de grupos y resultados de eliminatorias."""
     lut = _team_lookup(db)
     fixtures = {frozenset((f.home_team_id, f.away_team_id)): f for f in db.query(Fixture).all()}
 
@@ -72,32 +72,40 @@ def refresh_group_results(db: Session) -> dict:
     live: list[str] = []
     skipped = 0
     unmatched: list[str] = []
+    ko_events: list[dict] = []  # eliminatorias FINALIZADAS, para asignarlas a sus llaves
 
     for ev in _fetch_events():
         comp = ev["competitions"][0]
         st = ev["status"]["type"]
         state = st.get("state")  # "pre" | "in" | "post"
 
-        sides: dict[str, tuple[str | None, str, int]] = {}
+        sides: dict[str, tuple[str | None, str, int, bool]] = {}
         for c in comp["competitors"]:
             disp = c["team"]["displayName"]
             try:
                 score = int(c.get("score") or 0)
             except (TypeError, ValueError):
                 score = 0
-            sides[c.get("homeAway")] = (lut.get(_compact(disp)), disp, score)
+            sides[c.get("homeAway")] = (lut.get(_compact(disp)), disp, score, bool(c.get("winner")))
 
         if "home" not in sides or "away" not in sides:
             continue
-        h_id, h_name, h_score = sides["home"]
-        a_id, a_name, a_score = sides["away"]
+        h_id, h_name, h_score, h_win = sides["home"]
+        a_id, a_name, a_score, a_win = sides["away"]
         if not h_id or not a_id:
             unmatched.append(f"{h_name} vs {a_name}")
             continue
 
         fx = fixtures.get(frozenset((h_id, a_id)))
         if fx is None:
-            continue  # eliminación u otro: no hay fixture de grupo
+            # No es un partido de grupo: candidato a eliminatoria (solo si está finalizado).
+            if st.get("completed"):
+                ko_events.append({
+                    "h_id": h_id, "a_id": a_id, "h_score": h_score, "a_score": a_score,
+                    "winner_id": h_id if h_win else a_id if a_win else None,
+                    "label": f"{h_name} {h_score}-{a_score} {a_name}",
+                })
+            continue
 
         # Fecha de juego: se guarda aunque el partido no se haya jugado (sirve para ordenar).
         kickoff = _parse_dt(ev.get("date"))
@@ -122,4 +130,49 @@ def refresh_group_results(db: Session) -> dict:
             live.append(f"{h_name} {h_score}-{a_score} {a_name} {clock}".strip())
 
     db.commit()
-    return {"updated": updated, "live": live, "skipped": skipped, "unmatched": unmatched}
+    ko_updated = _assign_knockout_results(db, ko_events)
+    return {"updated": updated, "live": live, "skipped": skipped, "unmatched": unmatched, "knockout": ko_updated}
+
+
+def _assign_knockout_results(db: Session, ko_events: list[dict]) -> list[str]:
+    """Vuelca los resultados finalizados de eliminatorias en sus llaves del cuadro real.
+
+    Va por rondas: al guardar una ronda, la siguiente ya conoce a sus equipos. Solo
+    asigna llaves cuyos dos equipos están definidos (playable) y aún sin resultado.
+    Orienta los goles al lado local de la llave y, si hay empate, fija los penales con
+    el ganador que marca ESPN. Devuelve los marcadores aplicados."""
+    if not ko_events:
+        return []
+    from . import real_bracket, repository
+    from .models import KnockoutResult, RatingType
+
+    by_pair = {frozenset((e["h_id"], e["a_id"])): e for e in ko_events}
+    fifa = repository.latest_ratings(db, RatingType.Fifa)
+    names = repository.team_names(db)
+
+    applied: list[str] = []
+    progress = True
+    while progress:
+        progress = False
+        state = real_bracket.real_bracket_state(db, fifa, names)
+        existing = {r.tie_id for r in db.query(KnockoutResult).all()}
+        ko = state["knockout"]
+        all_ties = [*ko["round_of_32"], *ko["round_of_16"], *ko["quarter_finals"], *ko["semi_finals"], ko["final"]]
+        for tie in all_ties:
+            if not tie["playable"] or tie["tie_id"] in existing:
+                continue
+            hid, aid = tie["home"]["team_id"], tie["away"]["team_id"]
+            ev = by_pair.get(frozenset((hid, aid)))
+            if ev is None:
+                continue
+            hg, ag = (ev["h_score"], ev["a_score"]) if ev["h_id"] == hid else (ev["a_score"], ev["h_score"])
+            pen = None
+            if hg == ag:
+                pen = "home" if ev["winner_id"] == hid else "away" if ev["winner_id"] == aid else None
+                if pen is None:
+                    continue  # empate sin ganador conocido: no se puede resolver la llave
+            db.add(KnockoutResult(tie_id=tie["tie_id"], home_goals=hg, away_goals=ag, penalty_winner=pen))
+            db.commit()
+            applied.append(ev["label"])
+            progress = True
+    return applied

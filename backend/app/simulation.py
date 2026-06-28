@@ -461,6 +461,14 @@ def most_likely_bracket(data: SimulationInput, simulations: int, seed: int | Non
         home_fav = p_home_adv >= 0.5
         winner = h if home_fav else a
         win_prob = p_home_adv if home_fav else 1 - p_home_adv
+
+        # Si la llave ya se jugó de verdad, pasa el ganador REAL (no el favorito).
+        real_winner = data.known_knockout.get(tie.id)
+        is_real = real_winner is not None and real_winner in (h, a)
+        if is_real:
+            winner = real_winner
+            win_prob = 1.0
+
         winners[tie.id] = winner
         return {
             "tie_id": tie.id,
@@ -473,6 +481,7 @@ def most_likely_bracket(data: SimulationInput, simulations: int, seed: int | Non
             "winner_id": winner,
             "winner_name": names.get(winner, winner),
             "win_prob": round(win_prob, 4),
+            "real": is_real,
         }
 
     knockout = {

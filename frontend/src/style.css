@@ -231,11 +231,13 @@ tbody tr:hover { background: var(--panel-2); }
 }
 
 /* ---------- Cuadro clásico (bracket simétrico con trofeo) ---------- */
+/* El cuadro rompe el ancho del contenedor y ocupa toda la ventana (más amplitud). */
+.cb-panel { width: 100vw; margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw); border-radius: 0; }
 .cb-wrap { position: relative; display: flex; align-items: center; justify-content: center;
-  gap: 8px; padding: 14px 6px; overflow-x: auto; }
+  gap: 22px; padding: 18px 12px; overflow-x: auto; }
 .cb-svg { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; overflow: visible; }
 .cb-svg polyline { fill: none; stroke: var(--grass); stroke-width: 2; }
-.cb-side { display: flex; gap: 30px; position: relative; z-index: 1; }
+.cb-side { display: flex; gap: 42px; position: relative; z-index: 1; }
 .cb-round { display: flex; flex-direction: column; justify-content: space-around; height: 760px; }
 .cb-match { position: relative; width: 104px; }
 .cb-box { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
